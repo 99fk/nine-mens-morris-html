@@ -1,0 +1,636 @@
+<!--
+
+Nine Men's Morris
+
+Copyright (C) 2025 - Fatih (https://github.com/99fk)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+-->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0" />
+<title>Nine Men's Morris</title>
+<link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAA3ElEQVR4nOVX2xbDIAgzO/v/X2Yv1TFQBNuOdstT66VESOQURFQy8UiNfgUCT/4C4Gv1ICIoAttE+GMAQvsAtOdrlUAAxhxHPbpnvUpTegbSCVglaLDcUcU3WlPVvosADxSZ52of4R4lEJDH6rnAfSmkZyCdwEoJGgDQzAWz/mIRaBuFwtV4tH9wdygCHut8sHkHVyLcmpQpTqsbto081XI8xLaDo0QYS9sJBJax4oJe2pdLcZ8MWO6IOidMYNRSqwtmLddCegnSCbiuYgd+yAVRRe9xQCml4O//jl9MzU5V8lkzCQAAAABJRU5ErkJggg==">
+<style>
+  body{background:#2b1d14;color:#fff;font-family:Arial,sans-serif;text-align:center;margin:0;padding:0;transition:background .3s,color .3s}
+  h1{margin:10px;text-shadow:2px 2px #000}
+  #topbar{display:none;justify-content:center;gap:20px;align-items:center;margin-top:5px}
+  #volumePanel{display:inline-flex;align-items:center;gap:8px;background:#3e2723;padding:6px 10px;border-radius:8px;box-shadow:0 0 6px rgba(0,0,0,.4)}
+  #game{margin:20px auto;display:none;border:8px solid #5d4037;border-radius:8px;box-shadow:0 0 15px rgba(0,0,0,0.7);transition:background .3s}
+  #status{font-size:1.2em;margin-top:10px;text-shadow:1px 1px #000;display:none;min-height:1.4em}
+  .menu,.rules{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.8);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:10}
+  .rules{display:none}
+  .menu-content,.rules-content{background:#3e2723;padding:20px;border-radius:10px;max-width:360px;text-align:center;box-shadow:0 0 10px rgba(0,0,0,.5)}
+  button{margin:10px;padding:10px 20px;border:none;border-radius:6px;background:#ffb74d;color:#000;font-size:1em;cursor:pointer;box-shadow:2px 2px 5px rgba(0,0,0,.3);transition:background .3s}
+  button:hover{background:#ffcc80}
+  input[type=range]{width:120px}
+  label{user-select:none}
+  .light-mode{background:#f5f5f5;color:#222}
+  .light-mode #volumePanel{background:#ddd}
+  .light-mode h1{text-shadow:none}
+</style>
+</head>
+<body>
+<h1>Nine Men's Morris</h1>
+
+<div id="topbar">
+  <div id="volumePanel">
+    <label for="volumeSlider">🔊</label>
+    <input id="volumeSlider" type="range" min="0" max="1" step="0.01" value="0.2" />
+    <label><input id="muteToggle" type="checkbox" /> Mute</label>
+  </div>
+  <button id="modeBtn">🌗 Dark/Light</button>
+</div>
+
+<canvas id="game" width="400" height="400"></canvas>
+<div id="status"></div>
+
+<div class="menu" id="menu">
+  <div class="menu-content">
+    <h2>Welcome to Nine Men's Morris</h2>
+    <button id="start2PBtn">2 Players</button>
+    <button id="startAIBtn">Player vs AI</button>
+    <button id="rulesBtn">Rules</button>
+  </div>
+</div>
+
+<div class="rules" id="rules">
+  <div class="rules-content">
+    <h3>Game Rules</h3>
+    <p>
+      Place 9 pieces alternately. Form a mill (3 in a row) to remove an opponent's piece.
+      You cannot remove a piece from the opponent’s mill as long as they have other pieces
+      outside mills. After placement, move pieces along lines; with 3 pieces you may jump to
+      any free point. Goal: reduce the opponent to &lt; 3 pieces or block all their moves.
+    </p>
+    <button id="closeRulesBtn">Close</button>
+  </div>
+</div>
+
+<script>
+/* ---------- Canvas / UI ---------- */
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const statusDiv = document.getElementById('status');
+const menu = document.getElementById('menu');
+const rules = document.getElementById('rules');
+const rulesBtn = document.getElementById('rulesBtn');
+const closeRulesBtn = document.getElementById('closeRulesBtn');
+const start2PBtn = document.getElementById('start2PBtn');
+const startAIBtn = document.getElementById('startAIBtn');
+const topbar = document.getElementById('topbar');
+const volumeSlider = document.getElementById('volumeSlider');
+const muteToggle = document.getElementById('muteToggle');
+const modeBtn = document.getElementById('modeBtn');
+const body = document.body;
+
+/* ---------- Audio ---------- */
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+let masterVolume = parseFloat(volumeSlider.value);
+let muted = false;
+volumeSlider.addEventListener('input', () => masterVolume = parseFloat(volumeSlider.value));
+muteToggle.addEventListener('change', () => muted = muteToggle.checked);
+
+function playSound(freq=440, duration=0.15, type='sine') {
+  if (muted || masterVolume <= 0) return;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+  gain.gain.setValueAtTime(masterVolume, audioCtx.currentTime);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + duration);
+}
+
+/* ---------- Dark/Light ---------- */
+let isLightMode = false;
+modeBtn.addEventListener('click', toggleMode);
+function toggleMode() {
+  isLightMode = !isLightMode;
+  if (isLightMode) {
+    body.classList.add('light-mode');
+    canvas.style.background = 'radial-gradient(circle at center, #eee 0%, #ccc 100%)';
+  } else {
+    body.classList.remove('light-mode');
+    canvas.style.background = 'radial-gradient(circle at center, #4e342e 0%, #2b1d14 100%)';
+  }
+  drawBoard();
+}
+
+/* ---------- Game State ---------- */
+let currentPlayer = 1; // 1 White, 2 Black
+let whiteStones = [];
+let blackStones = [];
+const maxStones = 9;
+
+let removing = false;
+let movingStone = null;
+let phase = "set"; // "set" | "move"
+let gameOver = false;
+
+let vsAI = false;
+const AI_PLAYER = 2; // Black
+
+/* ---------- Geometry ---------- */
+const mills = [
+  [0,1,2],[3,4,5],[6,7,8],
+  [9,10,11],[12,13,14],[15,16,17],
+  [18,19,20],[21,22,23],
+  [0,9,21],[3,10,18],[6,11,15],
+  [1,4,7],[16,19,22],[8,12,17],
+  [5,13,20],[2,14,23]
+];
+
+const points = [
+  [20,20],[200,20],[380,20],
+  [60,60],[200,60],[340,60],
+  [100,100],[200,100],[300,100],
+  [20,200],[60,200],[100,200],[300,200],[340,200],[380,200],
+  [100,300],[200,300],[300,300],
+  [60,340],[200,340],[340,340],
+  [20,380],[200,380],[380,380]
+];
+
+const neighbors = {
+  0:[1,9],1:[0,2,4],2:[1,14],
+  3:[4,10],4:[1,3,5,7],5:[4,13],
+  6:[7,11],7:[4,6,8],8:[7,12],
+  9:[0,10,21],10:[3,9,11,18],11:[6,10,15],
+  12:[8,13,17],13:[5,12,14,20],14:[2,13,23],
+  15:[11,16],16:[15,17,19],17:[12,16],
+  18:[10,19],19:[16,18,20,22],20:[13,19],
+  21:[9,22],22:[19,21,23],23:[14,22]
+};
+
+/* ---------- Utils ---------- */
+function samePos(a,b){return a[0]===b[0] && a[1]===b[1];}
+function ownerOfStone(stone){ return whiteStones.some(s=>samePos(s,stone)) ? 1 : 2; }
+function indexOfPoint(stone){ return points.findIndex(p=>p[0]===stone[0] && p[1]===stone[1]); }
+function pointToIndex(i){ return points[i]; }
+function getPlayerStones(p){ return p===1 ? whiteStones : blackStones; }
+function getOpponentStones(p){ return p===1 ? blackStones : whiteStones; }
+function isOccupiedXY(x,y){ return whiteStones.some(s=>samePos(s,[x,y])) || blackStones.some(s=>samePos(s,[x,y])); }
+function isOccupiedIdx(i){ const [x,y]=points[i]; return isOccupiedXY(x,y); }
+
+function isStoneInMill(stone) {
+  const owner = ownerOfStone(stone);
+  const own = getPlayerStones(owner).map(indexOfPoint);
+  const idx = indexOfPoint(stone);
+  return mills.some(m => m.includes(idx) && m.every(mi => own.includes(mi)));
+}
+
+function checkMill(stones, lastIdx) {
+  const idxs = stones.map(indexOfPoint);
+  return mills.some(m => m.includes(lastIdx) && m.every(mi => idxs.includes(mi)));
+}
+
+function canMove(stones) {
+  if (stones.length === 3) return true; // jumping
+  for (const s of stones){
+    const si = indexOfPoint(s);
+    for (const n of neighbors[si]){
+      if (!isOccupiedIdx(n)) return true;
+    }
+  }
+  return false;
+}
+
+function legalPlacementIndices() {
+  const free = [];
+  for (let i=0;i<points.length;i++) if (!isOccupiedIdx(i)) free.push(i);
+  return free;
+}
+
+function legalMovesForPlayer(player){
+  const stones = getPlayerStones(player);
+  const res = [];
+  const jump = (stones.length===3);
+  for (let i=0;i<stones.length;i++){
+    const fromIdx = indexOfPoint(stones[i]);
+    if (jump){
+      for (let t=0;t<points.length;t++){
+        if (!isOccupiedIdx(t)) res.push({from:i, to:t});
+      }
+    } else {
+      for (const t of neighbors[fromIdx]){
+        if (!isOccupiedIdx(t)) res.push({from:i, to:t});
+      }
+    }
+  }
+  return res;
+}
+
+function potentialMillByPlacing(player, idx) {
+  const stones = getPlayerStones(player);
+  const idxs = stones.map(indexOfPoint);
+  const all = [...idxs, idx];
+  return mills.some(m => m.includes(idx) && m.every(mi => all.includes(mi)));
+}
+
+function opponentCouldMillIfPlace(player, idx) {
+  const opp = player===1 ? 2 : 1;
+  const stones = getPlayerStones(opp);
+  const idxs = stones.map(indexOfPoint);
+  const all = [...idxs, idx];
+  return mills.some(m => m.includes(idx) && m.every(mi => all.includes(mi)));
+}
+
+/* ---------- UI Handlers ---------- */
+rulesBtn.addEventListener('click', ()=> rules.style.display='flex');
+closeRulesBtn.addEventListener('click', ()=> rules.style.display='none');
+start2PBtn.addEventListener('click', ()=> { vsAI=false; startGame(); });
+startAIBtn.addEventListener('click', ()=> { vsAI=true; startGame(); });
+
+function startGame(){
+  menu.style.display='none';
+  canvas.style.display='block';
+  statusDiv.style.display='block';
+  topbar.style.display='flex';
+  resetGame();
+}
+
+function resetGame(){
+  currentPlayer = 1;
+  whiteStones = [];
+  blackStones = [];
+  removing = false;
+  movingStone = null;
+  phase = "set";
+  gameOver = false;
+  statusDiv.textContent = "Player 1 (White) to move";
+  drawBoard();
+}
+
+/* ---------- Drawing ---------- */
+function drawBoard(){
+  ctx.clearRect(0,0,400,400);
+  ctx.strokeStyle = isLightMode ? '#333' : '#f5deb3';
+  ctx.lineWidth = 4;
+
+  ctx.strokeRect(20,20,360,360);
+  ctx.strokeRect(60,60,280,280);
+  ctx.strokeRect(100,100,200,200);
+
+  ctx.beginPath();
+  ctx.moveTo(200,20); ctx.lineTo(200,100);
+  ctx.moveTo(200,300); ctx.lineTo(200,380);
+  ctx.moveTo(20,200); ctx.lineTo(100,200);
+  ctx.moveTo(300,200); ctx.lineTo(380,200);
+  ctx.stroke();
+
+  whiteStones.forEach(([x,y]) => drawStone(x,y,'#fff',1));
+  blackStones.forEach(([x,y]) => drawStone(x,y,'#111',2));
+}
+
+function drawStone(x,y,color,player){
+  ctx.beginPath();
+  ctx.arc(x,y,14,0,Math.PI*2);
+  const g = ctx.createRadialGradient(x-4,y-4,4,x,y,14);
+  if (color==='#fff'){ g.addColorStop(0,'#fff'); g.addColorStop(1,'#aaa'); }
+  else { g.addColorStop(0,'#555'); g.addColorStop(1,'#000'); }
+  ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = isLightMode ? '#333' : '#f0e68c';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  if (phase==="move" && movingStone!==null && currentPlayer===player){
+    const stones = getPlayerStones(player);
+    const ms = stones[movingStone];
+    if (ms && ms[0]===x && ms[1]===y){
+      ctx.beginPath();
+      ctx.arc(x,y,18,0,Math.PI*2);
+      ctx.strokeStyle = isLightMode ? '#ffa000' : '#ffeb3b';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+  }
+}
+
+/* ---------- Input ---------- */
+canvas.addEventListener('click', (e)=>{
+  if (gameOver) return;
+  if (vsAI && currentPlayer===AI_PLAYER) return;
+
+  const r = canvas.getBoundingClientRect();
+  const mx = e.clientX - r.left;
+  const my = e.clientY - r.top;
+
+  let idx=-1, dist=999;
+  for (let i=0;i<points.length;i++){
+    const d = Math.hypot(mx-points[i][0], my-points[i][1]);
+    if (d<dist){ dist=d; idx=i; }
+  }
+  if (dist>=20) return;
+
+  if (removing){
+    removeStoneAt(idx);
+  } else if (phase==="set"){
+    placeStone(idx);
+  } else {
+    movePhaseClick(idx);
+  }
+});
+
+/* ---------- Core Flow ---------- */
+function placeStone(idx){
+  const [x,y] = points[idx];
+  if (isOccupiedXY(x,y)) return;
+
+  playSound(440, .1, 'square');
+  const myStones = getPlayerStones(currentPlayer);
+  myStones.push([x,y]);
+
+  let formedMill = checkMill(myStones, idx);
+  if (formedMill){
+    playSound(880,.2,'triangle');
+    removing = true;
+    statusDiv.textContent = `Mill! Player ${currentPlayer} removes a piece`;
+  } else {
+    nextPlayer();
+  }
+
+  drawBoard();
+
+  // Switch to move phase?
+  if (phase==="set" && whiteStones.length===maxStones && blackStones.length===maxStones){
+    phase = "move";
+    statusDiv.textContent += " – Moving phase begins!";
+    checkNoMovesForCurrentPlayer();
+  }
+
+  maybeAIMove();
+}
+
+function movePhaseClick(idx){
+  const stones = getPlayerStones(currentPlayer);
+
+  if (movingStone===null){
+    // select stone
+    const [x,y] = points[idx];
+    const si = stones.findIndex(s => samePos(s,[x,y]));
+    if (si!==-1){
+      movingStone = si;
+      statusDiv.textContent = "Piece selected – choose a destination.";
+      drawBoard();
+    }
+  } else {
+    const startIdx = indexOfPoint(stones[movingStone]);
+    const canJump = (stones.length===3);
+    if (!isOccupiedIdx(idx) && (canJump || neighbors[startIdx].includes(idx))){
+      playSound(500,.1,'square');
+      stones[movingStone] = [...points[idx]];
+      const formedMill = checkMill(stones, idx);
+      if (formedMill){
+        playSound(880,.2,'triangle');
+        removing = true;
+        statusDiv.textContent = `Mill! Player ${currentPlayer} removes a piece`;
+      } else {
+        nextPlayer();
+      }
+      movingStone = null;
+      drawBoard();
+      maybeAIMove();
+    } else {
+      movingStone = null;
+      statusDiv.textContent = "Invalid move – choose again.";
+      drawBoard();
+    }
+  }
+}
+
+function removeStoneAt(idx){
+  const [x,y] = points[idx];
+  const opponent = currentPlayer===1 ? 2 : 1;
+  const oppStones = getPlayerStones(opponent);
+
+  const clickedIndex = oppStones.findIndex(s=>samePos(s,[x,y]));
+  if (clickedIndex===-1) return;
+
+  const outside = oppStones.filter(s => !isStoneInMill(s));
+  const clickedStone = oppStones[clickedIndex];
+  const clickedInMill = isStoneInMill(clickedStone);
+
+  if (outside.length>0 && clickedInMill){
+    statusDiv.textContent = "You can't remove a piece from a mill while other pieces are free.";
+    return;
+  }
+
+  playSound(220,.2,'sawtooth');
+  oppStones.splice(clickedIndex,1);
+  removing = false;
+
+  // If we are still in set phase, no victory check (rule fix)
+  if (phase==="move") checkVictoryAfterTurn(opponent);
+
+  nextPlayer(true); // don't double-check again in nextPlayer
+  drawBoard();
+  maybeAIMove();
+}
+
+function nextPlayer(skipVictory=false){
+  currentPlayer = (currentPlayer===1)?2:1;
+
+  if (!skipVictory && phase==="move"){
+    checkNoMovesForCurrentPlayer();
+    if (gameOver) return;
+  }
+
+  const txt = currentPlayer===1 ? "Player 1 (White) to move" : (vsAI ? "AI (Black) thinking..." : "Player 2 (Black) to move");
+  statusDiv.textContent = txt;
+}
+
+function checkVictoryAfterTurn(loser){
+  // loser is the one who lost a stone
+  const lStones = getPlayerStones(loser);
+  if (lStones.length < 3){
+    endGame(loser===1 ? "Player 2 (Black) wins!" : "Player 1 (White) wins!");
+    return;
+  }
+}
+
+function checkNoMovesForCurrentPlayer(){
+  if (phase!=="move") return;
+  const stones = getPlayerStones(currentPlayer);
+  if (stones.length<3){
+    endGame(currentPlayer===1 ? "Player 2 (Black) wins!" : "Player 1 (White) wins!");
+    return;
+  }
+  if (!canMove(stones)){
+    endGame(currentPlayer===1 ? "Player 2 (Black) wins!" : "Player 1 (White) wins!");
+  }
+}
+
+function endGame(msg){
+  gameOver = true;
+  statusDiv.textContent = msg;
+  setTimeout(()=>{
+    menu.style.display='flex';
+    menu.querySelector('h2').textContent = "Game Over!";
+  }, 1500);
+}
+
+/* ---------- AI (Level 1 – simple heuristic) ---------- */
+function maybeAIMove(){
+  if (!vsAI || gameOver) return;
+  if (currentPlayer !== AI_PLAYER) return;
+
+  setTimeout(()=> {
+    if (phase==="set"){
+      aiPlace();
+    } else if (removing){
+      aiRemove();
+    } else {
+      aiMove();
+    }
+  }, 300);
+}
+
+function aiPlace(){
+  const free = legalPlacementIndices();
+
+  // 1) Win now: place to form mill
+  for (const idx of free){
+    if (potentialMillByPlacing(AI_PLAYER, idx)){
+      placeStoneAI(idx);
+      return;
+    }
+  }
+
+  // 2) Block opponent's immediate mill
+  for (const idx of free){
+    if (opponentCouldMillIfPlace(AI_PLAYER, idx)){
+      placeStoneAI(idx);
+      return;
+    }
+  }
+
+  // 3) Random
+  const idx = free[Math.floor(Math.random()*free.length)];
+  placeStoneAI(idx);
+}
+
+function placeStoneAI(idx){
+  const [x,y] = points[idx];
+  blackStones.push([x,y]);
+  playSound(440,.1,'square');
+
+  const formed = checkMill(blackStones, idx);
+  if (formed){
+    playSound(880,.2,'triangle');
+    removing = true;
+    statusDiv.textContent = "Mill! AI removes a piece";
+    drawBoard();
+    aiRemove();
+  } else {
+    currentPlayer = 1;
+    drawBoard();
+    statusDiv.textContent = "Player 1 (White) to move";
+  }
+
+  if (phase==="set" && whiteStones.length===maxStones && blackStones.length===maxStones){
+    phase="move";
+    statusDiv.textContent += " – Moving phase begins!";
+    checkNoMovesForCurrentPlayer();
+  }
+}
+
+function aiRemove(){
+  const opp = getPlayerStones(1);
+  // Prefer removing stones outside mills
+  let candidates = opp.filter(s => !isStoneInMill(s));
+  if (candidates.length===0) candidates = opp.slice();
+  const pick = candidates[Math.floor(Math.random()*candidates.length)];
+  const i = opp.findIndex(s => samePos(s,pick));
+  if (i!==-1) opp.splice(i,1);
+  playSound(220,.2,'sawtooth');
+  removing = false;
+
+  if (phase==="move") checkVictoryAfterTurn(1);
+
+  currentPlayer = 1;
+  drawBoard();
+  if (!gameOver) statusDiv.textContent = "Player 1 (White) to move";
+}
+
+function aiMove(){
+  const moves = legalMovesForPlayer(AI_PLAYER);
+  if (moves.length===0){
+    endGame("Player 1 (White) wins!");
+    return;
+  }
+
+  // 1) Create mill if possible
+  for (const m of moves){
+    const sim = simulateMove(AI_PLAYER, m);
+    const lastIdx = m.to;
+    const formed = checkMill(sim.my, lastIdx);
+    if (formed){ return doAIMove(m); }
+  }
+
+  // 2) Block opponent potential mill (if possible by moving on empty third)
+  for (const m of moves){
+    const targetIdx = m.to;
+    if (opponentCouldMillIfPlace(AI_PLAYER, targetIdx)){
+      return doAIMove(m);
+    }
+  }
+
+  // 3) Random
+  const m = moves[Math.floor(Math.random()*moves.length)];
+  doAIMove(m);
+}
+
+function simulateMove(player, move){
+  // returns new arrays (cloned) for evaluation
+  const stones = player===1 ? whiteStones.map(s=>[...s]) : blackStones.map(s=>[...s]);
+  const other = player===1 ? blackStones : whiteStones;
+  const fromStone = stones[move.from];
+  stones[move.from] = [...points[move.to]];
+  return { my: stones, opp: other };
+}
+
+function doAIMove(m){
+  const stones = getPlayerStones(AI_PLAYER);
+  stones[m.from] = [...points[m.to]];
+  playSound(500,.1,'square');
+
+  const formed = checkMill(stones, m.to);
+  if (formed){
+    playSound(880,.2,'triangle');
+    removing = true;
+    statusDiv.textContent = "Mill! AI removes a piece";
+    drawBoard();
+    aiRemove();
+  } else {
+    currentPlayer = 1;
+    statusDiv.textContent = "Player 1 (White) to move";
+    drawBoard();
+    checkNoMovesForCurrentPlayer();
+  }
+}
+
+drawBoard();
+
+document.addEventListener("contextmenu",function(e){e.preventDefault();});
+
+</script>
+</body>
+</html>
+
